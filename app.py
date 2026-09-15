@@ -6,7 +6,7 @@ from flask import Flask, g, redirect, render_template, request, url_for
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path("/tmp/todos.db") if os.environ.get("VERCEL") else BASE_DIR / "todos.db"
-DATABASE_URL = os.environ.get("POSTGRES_URL")
+DATABASE_URL = os.environ.get("SUPABASE_DB_URL") or os.environ.get("POSTGRES_URL")
 
 app = Flask(__name__)
 
