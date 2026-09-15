@@ -1,14 +1,52 @@
 import os
 import sqlite3
+from functools import wraps
 from pathlib import Path
 
-from flask import Flask, g, redirect, render_template, request, url_for
+from flask import Flask, g, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path("/tmp/todos.db") if os.environ.get("VERCEL") else BASE_DIR / "todos.db"
 DATABASE_URL = os.environ.get("SUPABASE_DB_URL") or os.environ.get("POSTGRES_URL")
 
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")
+
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "dev-only-secret-key-change-me")
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login"))
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if username == ADMIN_USERNAME and ADMIN_PASSWORD_HASH and check_password_hash(
+            ADMIN_PASSWORD_HASH, password
+        ):
+            session["logged_in"] = True
+            session["username"] = username
+            return redirect(url_for("index"))
+        error = "아이디 또는 비밀번호가 올바르지 않습니다."
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
 if DATABASE_URL:
     import psycopg2
@@ -67,16 +105,20 @@ init_db()
 
 
 @app.route("/")
+@login_required
 def index():
     db = get_db()
     cur = db.cursor()
     cur.execute("SELECT * FROM todos ORDER BY done ASC, id DESC")
     todos = cur.fetchall()
     remaining = sum(1 for t in todos if not t["done"])
-    return render_template("index.html", todos=todos, remaining=remaining)
+    return render_template(
+        "index.html", todos=todos, remaining=remaining, username=session.get("username")
+    )
 
 
 @app.route("/add", methods=["POST"])
+@login_required
 def add():
     title = request.form.get("title", "").strip()
     if title:
@@ -92,6 +134,7 @@ def add():
 
 
 @app.route("/toggle/<int:todo_id>", methods=["POST"])
+@login_required
 def toggle(todo_id):
     db = get_db()
     cur = db.cursor()
@@ -105,6 +148,7 @@ def toggle(todo_id):
 
 
 @app.route("/delete/<int:todo_id>", methods=["POST"])
+@login_required
 def delete(todo_id):
     db = get_db()
     cur = db.cursor()
